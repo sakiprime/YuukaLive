@@ -1,8 +1,8 @@
 package com.sakiprime.PowerfulEmpathy.controller;
 
+import cn.dev33.satoken.stp.StpUtil;
 import com.sakiprime.PowerfulEmpathy.entity.UserEntity;
 import com.sakiprime.PowerfulEmpathy.service.LoginService;
-import jakarta.servlet.http.HttpSession;
 import org.springframework.web.bind.annotation.*;
 import com.sakiprime.PowerfulEmpathy.util.Result;
 
@@ -21,29 +21,31 @@ public class LoginController {
     return registered?Result.success(null):Result.fail(500,"用户已存在");
     }
     @PostMapping("/login")
-    public Result<Void> login(@RequestBody UserEntity unCheckedUser, HttpSession session){
+    public Result<Void> login(@RequestBody UserEntity unCheckedUser) {
 
-    UserEntity userdata = loginService.login(unCheckedUser.getId(), unCheckedUser.getPassword());
-    if(userdata == null){
-        return Result.fail(500,"账号或密码错误");
-    }
-    session.setAttribute("loginUser", userdata);
+        UserEntity userdata = loginService.login(unCheckedUser.getId(), unCheckedUser.getPassword());
+        if(userdata == null){
+            return Result.fail(500,"账号或密码错误");
+        }
 
-    return Result.success(null);
+        StpUtil.login(userdata.getId());
+
+        StpUtil.getSessionByLoginId(userdata.getId()).set("loginUser", userdata);
+
+        return Result.success(null);
     }
     @GetMapping("/checkLogin")
-    public Result<Void> checkLogin(HttpSession session) {
-
-        UserEntity loginUser = (UserEntity) session.getAttribute("loginUser");
-        if(loginUser == null){
+    public Result<Void> checkLogin() {
+        // 一行判断是否登录
+        if (!StpUtil.isLogin()) {
             return Result.fail();
         }
         return Result.success(null);
     }
     @GetMapping("/logout")
-    public Result<Void> logout(HttpSession session) {
-
-        session.invalidate(); // 清空Session
-        return Result.success("退出登录成功",null);
+    public Result<Void> logout() {
+        // Sa-Token 退出：自动清除会话、Cookie、Redis/内存
+        StpUtil.logout();
+        return Result.success("退出登录成功", null);
     }
 }
