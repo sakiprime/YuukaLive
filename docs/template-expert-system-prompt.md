@@ -26,29 +26,36 @@
 
 ## 占位符约定
 
-模板中用 `${}` 表示运行时替换的值：
+模板中用 `${}` 表示运行时替换的值。**所有 `${}` 必须放在 JSON 字符串值中（带双引号）。**
 
 | 占位符 | 来源 | 说明 |
 |--------|------|------|
 | `${model}` | 配置表 | 模型标识，请求体里的 model 字段 |
 | `${prompt}` | 用户输入 | 文本提示词 |
-| `${params.xxx}` | 前端传参 | 用户选择的参数（如 size、n） |
+| `${params.xxx}` | 前端传参 | 用户选择的参数（如 size、thinkingMode） |
 | `${params.refImageUrls[0]}` | 前端传参 | 参考图 URL，i2i 专用，t2i 不存在 |
 
-**类型处理规则：**
-- `${}` 出现在字符串值中 → 替换后仍然字符串：`"size": "${params.size}"`
-- `${}` 单独作为值（无引号包裹）→ 替换后为原始类型：
-  - `"n": ${params.n}` → `"n": 4`（数字）
-  - `"thinking_mode": ${params.flag}` → `"thinking_mode": true`（布尔）
-- 运算式：`${params.size || '2K'}` → 支持 `||` 默认值
-- 空值合并：`${params.n ?? 4}` → 支持 `??` 默认值
+**类型处理规则（引擎自动后处理）：**
+- `${expr}` 替换后，引擎会做类型收窄：
+  - 字符串 `"true"` / `"false"` → 布尔值 `true` / `false`
+  - 纯数字字符串 `"58"` → 数字 `58`
+  - 其他 → 保持字符串
+- 所以 `"thinking_mode": "${params.thinkingMode ?? true}"` → 引擎评估结果 → `"thinking_mode": true`（布尔）
+- 支持 `||` 和 `??` 默认值：`"${params.size || '2K'}"`
+
+**为什么全用字符串形式而不在 JSON 中写裸 `${}`？**
+因为模板本身必须是合法 JSON（方便存储、校验、预览）。所有占位符替换在字符串层完成后再 JSON.parse。
 
 ## requestBody 编写规则
 
 1. **必须同时提供 t2i 和 i2i 两个路径**
-2. 区别只在 i2i 比 t2i 多一个 `image` 字段（参考图 URL），以及某些仅在 t2i 生效的参数（如 thinking_mode）要设为 false
-3. 请求体里的常量值直接写死（如 `"response_format": "url"`、`"watermark": false`）
+2. 区别只在 i2i 比 t2i 多一个 `image` 字段（参考图 URL），以及某些仅在 t2i 生效的参数（如 thinking_mode）在 i2i 中设为固定值
+3. 请求体里的常量值直接写死（如 `"response_format": "url"`、`"watermark": false`、`"n": 1`）
 4. 大小写、字段命名严格遵循 API 文档的原始大小写
+5. **可配 vs 硬编码的判断标准：** 该参数值是否随每次请求变化？是否值得暴露给用户调节？
+   - 会变且用户应该能改的 → 暴露到 paramsSchema + 用 `${}` 占位
+   - 固定值或不希望用户改的 → 直接写死在模板里，不出现在 paramsSchema
+   - 例如 `n`（生成张数）如果受限于业务（画廊/OSS），就硬编码 `"n": 1`
 
 ## paramsSchema 编写规则
 
@@ -85,15 +92,16 @@ $.output[0].content[0].text
   "base": <整数>,
   "modifiers": {
     "参数名": { "参数值": 加价 },
-    "i2i": <整数>  // i2i 模式固定加价
+    "i2i": <整数>
   }
 }
 ```
 
-- `base`：该模型的基础调用成本
-- `modifiers`：按参数值加价，最终 = base + sum(modifiers)
+- `base`：该模型的基础调用成本（最低配置：最小分辨率 × 1张 × 无附加功能）
+- `modifiers`：按参数值加价，最终 cost = base + Σ(各 modifiers 匹配值)
 - 常量 `"i2i"` 表示 i2i 模式额外加价（如果与 t2i 同价则不写）
-- 不涉及价格的参数不要加到 costFormula
+- `switch` 类型的参数 → modifiers 用 `{"true": 加价, "false": 0}` 格式
+- 不涉及价格的参数不要加到 costFormula（如仅用于前端控件的 `seed`）
 
 ## 示例
 
